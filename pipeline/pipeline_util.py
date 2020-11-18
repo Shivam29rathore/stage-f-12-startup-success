@@ -34,18 +34,15 @@ from tfx_bsl.tfxio import dataset_options
 _MAX_CATEGORICAL_FEATURE_VALUES = [24, 31, 12]
 
 _CATEGORICAL_FEATURE_KEYS = [
-    'raised_amount_usd', 'pre_money_valuation_usd',
-    'post_money_valuation_usd', 'participants', 'is_first_round', 'is_last_round'
+    'is_first_round', 'is_last_round'
 ]
-
-_DENSE_FLOAT_FEATURE_KEYS = ['funded_at',
-                             'funding_round_type', 'funding_round_code']
 
 # Number of buckets used by tf.transform for encoding each feature.
 _FEATURE_BUCKET_COUNT = 10
 
 _BUCKET_FEATURE_KEYS = [
-    'funded_object_id', 'investor_object_id', 'created_at_x', 'updated_at_x'
+    'raised_amount_usd', 'pre_money_valuation_usd',
+    'post_money_valuation_usd'
 ]
 
 # Number of vocabulary terms used for encoding VOCAB_FEATURES by tf.transform
@@ -55,13 +52,12 @@ _VOCAB_SIZE = 1000
 _OOV_SIZE = 10
 
 _VOCAB_FEATURE_KEYS = [
-    'pre_money_valuation_usd',
-    'post_money_valuation_usd',
+    'funded_object_id', 'investor_object_id', 'funding_round_type', 'funding_round_code'
 ]
 
 # Keys
 _LABEL_KEY = 'participants'
-_FARE_KEY = 'raised_amount_usd'
+_ROUND_KEY = 'is_first_round'
 
 
 def _transformed_name(key):
@@ -102,11 +98,6 @@ def preprocessing_fn(inputs):
       Map from string feature key to transformed feature operations.
     """
     outputs = {}
-    for key in _DENSE_FLOAT_FEATURE_KEYS:
-        # Preserve this feature as a dense float, setting nan's to the mean.
-        outputs[_transformed_name(key)] = tft.scale_to_z_score(
-            _fill_in_missing(inputs[key]))
-
     for key in _VOCAB_FEATURE_KEYS:
         # Build a vocabulary for this feature.
         outputs[_transformed_name(key)] = tft.compute_and_apply_vocabulary(
@@ -121,15 +112,15 @@ def preprocessing_fn(inputs):
     for key in _CATEGORICAL_FEATURE_KEYS:
         outputs[_transformed_name(key)] = _fill_in_missing(inputs[key])
 
-    # Was this passenger a big tipper?
-    taxi_fare = _fill_in_missing(inputs[_FARE_KEY])
-    tips = _fill_in_missing(inputs[_LABEL_KEY])
+    # Was this participants get a bigger rounds?
+    rounds = _fill_in_missing(inputs[_ROUND_KEY])
+    participants = _fill_in_missing(inputs[_LABEL_KEY])
     outputs[_transformed_name(_LABEL_KEY)] = tf.compat.v1.where(
-        tf.math.is_nan(taxi_fare),
-        tf.cast(tf.zeros_like(taxi_fare), tf.int64),
+        tf.math.is_nan(rounds),
+        tf.cast(tf.zeros_like(rounds), tf.int64),
         # Test if the tip was > 20% of the fare.
         tf.cast(
-            tf.greater(tips, tf.multiply(taxi_fare, tf.constant(0.2))), tf.int64))
+            tf.greater(participants, tf.multiply(rounds, tf.constant(0.2))), tf.int64))
 
     return outputs
 
@@ -148,10 +139,6 @@ def _build_estimator(config, hidden_units=None, warm_start_from=None):
         - eval_spec: Spec for eval.
         - eval_input_receiver_fn: Input function for eval.
     """
-    real_valued_columns = [
-        tf.feature_column.numeric_column(key, shape=())
-        for key in _transformed_names(_DENSE_FLOAT_FEATURE_KEYS)
-    ]
     categorical_columns = [
         tf.feature_column.categorical_column_with_identity(
             key, num_buckets=_VOCAB_SIZE + _OOV_SIZE, default_value=0)
@@ -173,7 +160,7 @@ def _build_estimator(config, hidden_units=None, warm_start_from=None):
     return tf.estimator.DNNLinearCombinedClassifier(
         config=config,
         linear_feature_columns=categorical_columns,
-        dnn_feature_columns=real_valued_columns,
+        dnn_feature_columns=None,
         dnn_hidden_units=hidden_units or [100, 70, 50, 25],
         warm_start_from=warm_start_from)
 
